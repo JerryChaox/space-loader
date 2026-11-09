@@ -27,7 +27,7 @@ function readAddr() {
   const tg = window.Telegram && Telegram.WebApp;
   if (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) return tg.initDataUnsafe.start_param;
   const h = new URLSearchParams(location.hash.slice(1));
-  return h.get("addr");
+  return h.get("addr") || new URLSearchParams(location.search).get("addr");
 }
 
 async function main() {
