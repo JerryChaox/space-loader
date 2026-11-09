@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Space</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; background: #fff; }
+  #bar { position: fixed; inset: 0 0 auto 0; padding: 6px 10px; font-size: 12px; color: #555; background: #f3f3f0; border-bottom: 1px solid #ddd; z-index: 1; }
+  #frame { position: fixed; top: 29px; left: 0; width: 100%; height: calc(100% - 29px); border: 0; }
+</style>
+</head>
+<body>
+<div id="bar">正在加载…</div>
+<iframe id="frame" title="Space"></iframe>
+<script src="wasm_exec.js"></script>
+<script>
+const bar = document.getElementById("bar");
+const log = (m) => { bar.textContent = m; console.log("[space]", m); };
+window.spaceLog = [];
+const t0 = performance.now();
+const ms = () => Math.round(performance.now() - t0);
+
+// Address: Telegram start_param, else #addr=... (for testing outside Telegram).
+function readAddr() {
+  const tg = window.Telegram && Telegram.WebApp;
+  if (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) return tg.initDataUnsafe.start_param;
+  const h = new URLSearchParams(location.hash.slice(1));
+  return h.get("addr");
+}
+
+async function main() {
+  if (window.Telegram && Telegram.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
+  const addr = readAddr();
+  if (!addr) return log("缺少环境地址");
+  if (!("serviceWorker" in navigator)) return log("这个内嵌浏览器不支持 Service Worker");
+
+  const reg = await navigator.serviceWorker.register("sw.js");
+  await navigator.serviceWorker.ready;
+  navigator.serviceWorker.addEventListener("message", async (e) => {
+    if (e.data?.type !== "space-fetch") return;
+    const port = e.ports[0];
+    const st = performance.now();
+    try {
+      const r = await spaceFetch(e.data);
+      window.spaceLog.push([e.data.method, e.data.path, r.status, Math.round(performance.now() - st)]);
+      port.postMessage(r, [r.body.buffer]);
+    } catch (err) {
+      window.spaceLog.push([e.data.method, e.data.path, "ERR " + err.message]);
+      port.postMessage({ error: String(err.message || err) });
+    }
+  });
+
+  log("下载隧道组件…");
+  const go = new Go();
+  const ready = new Promise((r) => (window.onSpaceReady = r));
+  const resp = await fetch("space.wasm");
+  const { instance } = await WebAssembly.instantiateStreaming(resp, go.importObject);
+  go.run(instance);
+  await ready;
+  window.wasmMs = ms();
+
+  log("连接环境…");
+  const c = await spaceConnect({ addr, port: 80, derpMapURL: "https://tailcat.dev/derpmap.json", verbose: new URLSearchParams(location.search).has("verbose") });
+  window.connectMs = ms();
+  log(`已连接 · 组件 ${(window.wasmMs / 1000).toFixed(1)}s · 隧道 ${(c.connectMs / 1000).toFixed(1)}s · 经中转`);
+  document.getElementById("frame").src = "s/";
+}
+main().catch((e) => log("失败：" + (e.message || e)));
+</script>
+</body>
+</html>
